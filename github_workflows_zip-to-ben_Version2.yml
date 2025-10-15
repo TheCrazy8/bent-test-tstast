@@ -1,0 +1,78 @@
+name: Convert ZIPs to .ben
+
+on:
+  # Automatically convert new .zip files pushed into the uploads/ folder
+  push:
+    paths:
+      - "uploads/**/*.zip"
+  # Allow manual runs with a custom pattern
+  workflow_dispatch:
+    inputs:
+      pattern:
+        description: "Glob pattern of ZIP files to convert"
+        required: false
+        default: "uploads/**/*.zip"
+      overwrite:
+        description: "Overwrite existing .ben files (otherwise add suffix -1, -2, ...)"
+        required: false
+        type: boolean
+        default: false
+      verify_zip:
+        description: "Verify inputs are valid ZIP files"
+        required: false
+        type: boolean
+        default: true
+      commit_message:
+        description: "Commit message for changes"
+        required: false
+        default: "Convert ZIPs to .ben"
+
+jobs:
+  convert:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      # Provide defaults for both push and manual workflows
+      PATTERN: ${{ github.event_name == 'workflow_dispatch' && inputs.pattern || 'uploads/**/*.zip' }}
+      OVERWRITE: ${{ github.event_name == 'workflow_dispatch' && inputs.overwrite || 'false' }}
+      VERIFY: ${{ github.event_name == 'workflow_dispatch' && inputs.verify_zip || 'true' }}
+      COMMIT_MESSAGE: ${{ github.event_name == 'workflow_dispatch' && inputs.commit_message || 'Convert ZIPs to .ben' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Convert ZIPs to .ben
+        shell: bash
+        run: |
+          set -euo pipefail
+          FORCE=""
+          if [ "${OVERWRITE}" = "true" ]; then FORCE="--force"; fi
+          NO_VERIFY=""
+          if [ "${VERIFY}" = "false" ]; then NO_VERIFY="--no-verify"; fi
+
+          echo "Pattern: ${PATTERN}"
+          echo "Overwrite: ${OVERWRITE}"
+          echo "Verify ZIP: ${VERIFY}"
+
+          # Run conversion; script safely handles no matches
+          python change_zip_ext.py --pattern "${PATTERN}" --to ".ben" ${FORCE} ${NO_VERIFY} || true
+
+      - name: Commit and push changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -n "$(git status --porcelain)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add -A
+            git commit -m "${COMMIT_MESSAGE}"
+            git push
+          else
+            echo "No changes to commit."
+          fi
